@@ -2,13 +2,12 @@ import pandas as pd
 import folium
 from folium.plugins import MarkerCluster
 import requests
-import json
 import time
 from tqdm import tqdm
 import os
 from datetime import datetime
 import signal
-import sys
+
 
 class AddressMapper:
     def __init__(self, api_key):
@@ -16,7 +15,7 @@ class AddressMapper:
         self.interrupted = False
         signal.signal(signal.SIGINT, self.handle_interrupt)
 
-    def handle_interrupt(self, signum, frame):
+    def handle_interrupt(self):
         print("\nGracefully shutting down...")
         self.interrupted = True
 
@@ -103,6 +102,7 @@ class AddressMapper:
 
         return m
 
+
 def main():
     try:
         from config import API_KEY
@@ -156,6 +156,7 @@ def main():
         print("\nProcess interrupted by user.")
     except Exception as e:
         print(f"An error occurred: {str(e)}")
+
 
 if __name__ == "__main__":
     main()
