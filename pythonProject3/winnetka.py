@@ -1,12 +1,12 @@
-import pandas as pd
-import folium
-from folium.plugins import MarkerCluster
-import requests
-import time
 from tqdm import tqdm
 import os
 from datetime import datetime
 import signal
+import time
+import requests
+import pandas as pd
+import folium
+from folium.plugins import MarkerCluster
 
 
 class AddressMapper:
@@ -15,7 +15,7 @@ class AddressMapper:
         self.interrupted = False
         signal.signal(signal.SIGINT, self.handle_interrupt)
 
-    def handle_interrupt(self):
+    def handle_interrupt(self, signum, frame):
         print("\nGracefully shutting down...")
         self.interrupted = True
 
@@ -71,7 +71,70 @@ class AddressMapper:
 
         return results
 
-    def create_map(self, geocoded_data, labels):
+    def add_polygon(self, m, coordinates, color='red', fill_color='red',
+                    fill_opacity=0.2, popup_text=None):
+        """
+        Add a polygon to the map using coordinates with a centered label.
+
+        Args:
+            m: folium Map object
+            coordinates: List of [lat, lon] pairs defining polygon corners
+            color: Stroke color of the polygon
+            fill_color: Fill color of the polygon
+            fill_opacity: Opacity of the polygon fill (0-1)
+            popup_text: Optional text to display when clicking the polygon
+        """
+        # Add the polygon
+        folium.Polygon(
+            locations=coordinates,
+            color=color,
+            fill_color=fill_color,
+            fill_opacity=fill_opacity,
+            popup=folium.Popup(popup_text, max_width=300) if popup_text else None
+        ).add_to(m)
+
+        # Calculate center point of polygon for label placement
+        lats = [coord[0] for coord in coordinates]
+        lons = [coord[1] for coord in coordinates]
+        center_lat = sum(lats) / len(lats)
+        center_lon = sum(lons) / len(lons)
+
+        # Add label at center point
+        if popup_text:
+            label_html = f'''
+                <div style="
+                    background-color: rgba(255, 255, 255, 0.8);
+                    padding: 2px 6px;
+                    border: 1px solid {color};
+                    border-radius: 3px;
+                    font-weight: bold;
+                    font-size: 12px;
+                    text-align: center;
+                    text-shadow: 1px 1px 1px white;
+                ">{popup_text}</div>
+            '''
+
+            folium.DivIcon(
+                html=label_html,
+            ).add_to(folium.Marker(
+                [center_lat, center_lon],
+                icon=folium.Icon(html=label_html)
+            ).add_to(m))
+
+    def create_map(self, geocoded_data, labels, polygons=None):
+        """
+        Create a map with markers and optional polygons.
+
+        Args:
+            geocoded_data: List of dicts with geocoded addresses
+            labels: List of labels for the markers
+            polygons: List of dicts with polygon information, each containing:
+                     - coordinates: List of [lat, lon] pairs
+                     - color: (optional) Stroke color
+                     - fill_color: (optional) Fill color
+                     - fill_opacity: (optional) Fill opacity
+                     - popup_text: (optional) Popup text
+        """
         if not geocoded_data:
             raise ValueError("No geocoded data provided")
 
@@ -83,6 +146,19 @@ class AddressMapper:
             tiles='OpenStreetMap'
         )
 
+        # Add polygons first (if provided) so they appear under the markers
+        if polygons:
+            for polygon in polygons:
+                self.add_polygon(
+                    m,
+                    coordinates=polygon['coordinates'],
+                    color=polygon.get('color', 'red'),
+                    fill_color=polygon.get('fill_color', 'red'),
+                    fill_opacity=polygon.get('fill_opacity', 0.2),
+                    popup_text=polygon.get('popup_text')
+                )
+
+        # Add markers with clustering
         marker_cluster = MarkerCluster().add_to(m)
 
         for i, point in enumerate(geocoded_data):
@@ -129,7 +205,7 @@ def main():
         df = df[
             (df['city'].str.lower() == 'winnetka') &
             (df['state'].str.lower() == 'il')
-        ]
+            ]
 
         full_addresses = df.apply(
             lambda row: f"{row['address']}, {row['city']}, {row['state']}",
@@ -142,13 +218,59 @@ def main():
         geocoded_data = mapper.batch_geocode(full_addresses)
 
         if geocoded_data:
-            print("Creating map...")
-            map_obj = mapper.create_map(geocoded_data, labels)
+            print("Loading polygon coordinates from CSV...")
+            try:
+                # Define colors for the polygons
+                colors = [
+                    'blue', 'red', 'green', 'purple',
+                    'orange', 'darkblue', 'darkred', 'darkgreen',
+                    'cadetblue', 'darkpurple', 'pink', 'lightblue',
+                    'lightred', 'lightgreen', 'gray', 'black'
+                ]
 
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            output_file = f'output/winnetka_map_{timestamp}.html'
-            map_obj.save(output_file)
-            print(f"Map saved to {output_file}")
+                # Read the polygon definitions
+                polygon_df = pd.read_csv('polygons.csv')
+                polygons = []
+
+                # Group by polygon_id to handle multiple vertices per polygon
+                for polygon_id, group in polygon_df.groupby('polygon_id'):
+                    # Sort by vertex_order if it exists
+                    if 'vertex_order' in group.columns:
+                        group = group.sort_values('vertex_order')
+
+                    # Extract coordinates
+                    coordinates = group[['lat', 'lon']].values.tolist()
+
+                    # Close the polygon by adding the first point at the end if needed
+                    if coordinates[0] != coordinates[-1]:
+                        coordinates.append(coordinates[0])
+
+                    polygons.append({
+                        'coordinates': coordinates,
+                        'color': colors[len(polygons) % len(colors)],
+                        'fill_color': colors[len(polygons) % len(colors)],
+                        'fill_opacity': 0.2,
+                        'popup_text': group['name'].iloc[0] if 'name' in group else f'Area {polygon_id}'
+                    })
+
+                print("Creating map...")
+                map_obj = mapper.create_map(
+                    geocoded_data,
+                    labels,
+                    polygons=polygons
+                )
+
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                output_file = f'output/winnetka_map_{timestamp}.html'
+                map_obj.save(output_file)
+                print(f"Map saved to {output_file}")
+            except FileNotFoundError:
+                print("Note: polygons.csv not found. Creating map without polygons...")
+                map_obj = mapper.create_map(geocoded_data, labels)
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                output_file = f'output/winnetka_map_{timestamp}.html'
+                map_obj.save(output_file)
+                print(f"Map saved to {output_file}")
         else:
             print("No addresses were successfully geocoded.")
 
