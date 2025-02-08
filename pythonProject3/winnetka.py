@@ -75,14 +75,6 @@ class AddressMapper:
                     fill_opacity=0.2, popup_text=None):
         """
         Add a polygon to the map using coordinates with a centered label.
-
-        Args:
-            m: folium Map object
-            coordinates: List of [lat, lon] pairs defining polygon corners
-            color: Stroke color of the polygon
-            fill_color: Fill color of the polygon
-            fill_opacity: Opacity of the polygon fill (0-1)
-            popup_text: Optional text to display when clicking the polygon
         """
         # Add the polygon
         folium.Polygon(
@@ -93,24 +85,35 @@ class AddressMapper:
             popup=folium.Popup(popup_text, max_width=300) if popup_text else None
         ).add_to(m)
 
-        # Calculate center point of polygon for label placement
-        lats = [coord[0] for coord in coordinates]
-        lons = [coord[1] for coord in coordinates]
-        center_lat = sum(lats) / len(lats)
-        center_lon = sum(lons) / len(lons)
+        # Calculate centroid of polygon for better label placement
+        def calculate_centroid(coords):
+            area = 0
+            cx = 0
+            cy = 0
+            for i in range(len(coords) - 1):
+                lat1, lon1 = coords[i]
+                lat2, lon2 = coords[i + 1]
+                cross = lat1 * lon2 - lat2 * lon1
+                area += cross
+                cx += (lat1 + lat2) * cross
+                cy += (lon1 + lon2) * cross
+            area /= 2
+            cx = cx / (6 * area)
+            cy = cy / (6 * area)
+            return abs(cx), abs(cy)
 
-        # Add label at center point
+        # Get centroid
+        center_lat, center_lon = calculate_centroid(coordinates)
+
+        # Add label at centroid
         if popup_text:
             label_html = f'''
                 <div style="
-                    background-color: rgba(255, 255, 255, 0.8);
-                    padding: 2px 6px;
-                    border: 1px solid {color};
-                    border-radius: 3px;
+                    color: {color};
                     font-weight: bold;
-                    font-size: 12px;
+                    font-size: 16px;
                     text-align: center;
-                    text-shadow: 1px 1px 1px white;
+                    text-shadow: 2px 2px 2px white, -2px -2px 2px white, 2px -2px 2px white, -2px 2px 2px white;
                 ">{popup_text}</div>
             '''
 
@@ -118,7 +121,7 @@ class AddressMapper:
                 html=label_html,
             ).add_to(folium.Marker(
                 [center_lat, center_lon],
-                icon=folium.Icon(html=label_html)
+                icon=folium.DivIcon(html=label_html)
             ).add_to(m))
 
     def create_map(self, geocoded_data, labels, polygons=None):
