@@ -124,19 +124,14 @@ class AddressMapper:
                 icon=folium.DivIcon(html=label_html)
             ).add_to(m))
 
-    def create_map(self, geocoded_data, labels, polygons=None):
+    def create_map(self, geocoded_data, contact_info, polygons=None):
         """
         Create a map with markers and optional polygons.
 
         Args:
             geocoded_data: List of dicts with geocoded addresses
-            labels: List of labels for the markers
-            polygons: List of dicts with polygon information, each containing:
-                     - coordinates: List of [lat, lon] pairs
-                     - color: (optional) Stroke color
-                     - fill_color: (optional) Fill color
-                     - fill_opacity: (optional) Fill opacity
-                     - popup_text: (optional) Popup text
+            contact_info: List of dicts containing contact information
+            polygons: List of dicts with polygon information
         """
         if not geocoded_data:
             raise ValueError("No geocoded data provided")
@@ -165,18 +160,27 @@ class AddressMapper:
         marker_cluster = MarkerCluster().add_to(m)
 
         for i, point in enumerate(geocoded_data):
-            label = labels[i]
+            info = contact_info[i]
+
+            # Create formatted popup text with all contact information
             popup_text = f"""
-            <div style="min-width: 200px;">
-                <h4 style="margin-bottom: 10px;">{label}</h4>
-                <p><strong>Address:</strong><br>{point['address']}</p>
+            <div style="min-width: 300px;">
+                <h4 style="margin-bottom: 10px;">Contact Information</h4>
+                <p><strong>First Name:</strong> {info.get('First Name:', 'N/A')}</p>
+                <p><strong>Last Name:</strong> {info.get('Last Name:', 'N/A')}</p>
+                <p><strong>Address:</strong> {info.get('Address:', 'N/A')}</p>
+                <p><strong>Phone:</strong> {info.get('Phone:', 'N/A')}</p>
+                <p><strong>Email:</strong> {info.get('Email:', 'N/A')}</p>
             </div>
             """
+
+            # Create tooltip with name
+            tooltip = f"{info.get('First Name:', '')} {info.get('Last Name:', '')}"
 
             folium.Marker(
                 [point['lat'], point['lon']],
                 popup=folium.Popup(popup_text, max_width=300),
-                tooltip=label
+                tooltip=tooltip
             ).add_to(marker_cluster)
 
         return m
@@ -205,17 +209,25 @@ def main():
         print("Reading addresses from CSV...")
         df = pd.read_csv(INPUT_FILE)
 
+        # Verify required columns exist
+        required_columns = ['First Name:', 'Last Name:', 'Address:', 'Phone:', 'Email:', 'city', 'state']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
+
         df = df[
             (df['city'].str.lower() == 'winnetka') &
             (df['state'].str.lower() == 'il')
             ]
 
+        # Create full addresses for geocoding
         full_addresses = df.apply(
-            lambda row: f"{row['address']}, {row['city']}, {row['state']}",
+            lambda row: f"{row['Address:']}, {row['city']}, {row['state']}",
             axis=1
         ).tolist()
 
-        labels = df['label'].tolist()
+        # Create list of contact information dictionaries
+        contact_info = df[['First Name:', 'Last Name:', 'Address:', 'Phone:', 'Email:']].to_dict('records')
 
         print("Geocoding addresses...")
         geocoded_data = mapper.batch_geocode(full_addresses)
@@ -259,7 +271,7 @@ def main():
                 print("Creating map...")
                 map_obj = mapper.create_map(
                     geocoded_data,
-                    labels,
+                    contact_info,
                     polygons=polygons
                 )
 
@@ -269,7 +281,7 @@ def main():
                 print(f"Map saved to {output_file}")
             except FileNotFoundError:
                 print("Note: polygons.csv not found. Creating map without polygons...")
-                map_obj = mapper.create_map(geocoded_data, labels)
+                map_obj = mapper.create_map(geocoded_data, contact_info)
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 output_file = f'output/winnetka_map_{timestamp}.html'
                 map_obj.save(output_file)
