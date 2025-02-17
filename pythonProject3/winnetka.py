@@ -226,11 +226,28 @@ def main():
             axis=1
         ).tolist()
 
-        # Create list of contact information dictionaries
+        # Create list of contact information dictionaries from CSV
         contact_info = df[['First Name:', 'Last Name:', 'Address:', 'Phone:', 'Email:']].to_dict('records')
+
+        # Add hard-coded contact with exact coordinates
+        hard_coded_contact = {
+            'First Name:': 'Rory',
+            'Last Name:': 'Hackbarth',
+            'Address:': '345 Locust Rd, Winnetka, IL',
+            'Phone:': '773-301-2537',
+            'Email:': 'roryhh@yahoo.com'
+        }
 
         print("Geocoding addresses...")
         geocoded_data = mapper.batch_geocode(full_addresses)
+
+        # Add hard-coded point with exact coordinates
+        geocoded_data.append({
+            'address': hard_coded_contact['Address:'],
+            'lat': 42.101643150118086,
+            'lon': -87.74253916537425
+        })
+        contact_info.append(hard_coded_contact)
 
         if geocoded_data:
             print("Loading polygon coordinates from CSV...")
